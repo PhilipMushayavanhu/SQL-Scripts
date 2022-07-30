@@ -1,0 +1,62 @@
+IF OBJECT_ID('_ccg_spChartOfAccountsVersions') IS NOT NULL
+BEGIN
+	DROP PROC _ccg_spChartOfAccountsVersions
+END
+GO
+-- EXEC _ccg_spChartOfAccountsVersions
+CREATE PROC _ccg_spChartOfAccountsVersions
+WITH ENCRYPTION
+AS
+BEGIN
+	IF OBJECT_ID('tempdb..#Accounts') IS NOT NULL
+	BEGIN
+		DROP TABLE #Accounts
+	END
+
+	CREATE TABLE #Accounts
+	(
+		AccountLink Int
+	)
+
+	INSERT INTO #Accounts 
+	SELECT AccountLink
+	FROM Accounts
+
+	DECLARE @Name varchar(20)
+		,@SCOAVersionID Int
+		,@SQL nvarchar(max)
+		,@SQL2 nvarchar(max)
+
+	DECLARE scoa_cursor CURSOR FOR 
+	SELECT ScoaTableName, InternalVersion 
+	FROM SCOA.DBO._as_SCOA_ScoaVersions 
+	ORDER BY InternalVersion DESC
+
+	OPEN scoa_cursor  
+	FETCH NEXT FROM scoa_cursor INTO @Name, @SCOAVersionID
+
+	WHILE @@FETCH_STATUS = 0  
+	BEGIN  
+		SELECT @SQL = 'ALTER TABLE #Accounts ADD ' +  @Name + ' varchar(100)'
+		EXEC sp_Executesql @SQL
+
+		SELECT @SQL = 'UPDATE A SET ' + @Name + ' = AV.Master_Sub_Account
+		FROM #Accounts A
+		LEFT JOIN _ccg_MPBM_tblFSAccountsAllVersions AV ON A.AccountLink = AV.AccountLink AND AV.MscoaVersionID = ' + CONVERT(varchar(2),@SCOAVersionID) 
+		EXEC sp_Executesql @SQL
+     
+		FETCH NEXT FROM scoa_cursor INTO @Name, @SCOAVersionID 
+	END 
+
+	CLOSE scoa_cursor  
+	DEALLOCATE scoa_cursor
+
+	SELECT A.AccountLink as AccountLinkID
+		,A.Master_Sub_Account
+		,A.Description as AccountDescription
+		,T.cAccountTypeDescription
+		,AV.*
+	FROM #Accounts AV
+	LEFT JOIN Accounts A on A.AccountLink = AV.AccountLink 
+	LEFT JOIN _etblGLAccountTypes T on T.idGLAccountType = A.iAccountType
+END
